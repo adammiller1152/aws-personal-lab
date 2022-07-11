@@ -1,5 +1,5 @@
 # CreateVpcPeering.yaml
-Creates a new network including a Vpc, Public and Private Subnets, Internet and NAT gateways, a CloudFormation "Custom Resource" Lambda function and more. Configures VPC Peering between the Vpc created in this template and the existing VPC in the same account created by the [CreateLabNetwork.yaml](/aws-personal-lab/aws-create-lab-network/CreateLabNetwork.yaml) file.
+Creates a new network including a Vpc, Public and Private Subnets, Internet and NAT gateways, a CloudFormation "Custom Resource" Lambda function and more. Configures VPC Peering between the Vpc created in this template and the existing VPC in the same account created by the [CreateLabNetwork.yaml](../aws-create-lab-network/CreateLabNetwork.yaml) file.
 
 ## About
 
@@ -7,11 +7,11 @@ This file expands on the simple AWS Network that deployed within the **CreateLab
 
 ## Deployment Instructions
 This CloudFormation template has the following pre-requisites:
-* Deploy the [CreateLabNetwork.yaml](/aws-personal-lab/aws-create-lab-network/CreateLabNetwork.yaml)
-* Create an EC2 Keypair (Can reuse the same keypair required for [CreateLabNetwork.yaml](/aws-personal-lab/aws-create-lab-network/CreateLabNetwork.yaml))
+* Deploy the [CreateLabNetwork.yaml](../aws-create-lab-network/CreateLabNetwork.yaml)
+* Create an EC2 Keypair (Can reuse the same keypair required for [CreateLabNetwork.yaml](../aws-create-lab-network/CreateLabNetwork.yaml))
 * Create **lambda_function.zip** using the contents of the [lambda](./lambda/) directory within this section
 * Upload the .zip file to an S3 bucket that has versioning enabled
-    * An S3 bucket that fits this requirement is created automatically as part of [CreateLabNetwork.yaml](/aws-personal-lab/aws-create-lab-network/CreateLabNetwork.yaml)
+    * An S3 bucket that fits this requirement is created automatically as part of [CreateLabNetwork.yaml](../aws-create-lab-network/CreateLabNetwork.yaml)
 
 Once all pre-requisites are met, this file can be deployed within **CloudFormation**.
 
