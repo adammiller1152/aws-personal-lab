@@ -1,0 +1,362 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Creates a new network including a VPC, a Private and Public Subnet, Internet and NAT gateways, and more.
+  Configures VPC Peering between this VPC and an existing VPC in the same account. (Created by the "CreateLabNetwork.yaml" file)
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: VPC
+        Parameters:
+          - VPC
+          - PrivateSubnet
+          - PublicSubnet
+
+      - Label:
+          default: Instances
+        Parameters:
+          - PrivateInstanceType
+          - PrivateInstanceAMI
+
+      - Label:
+          default: S3 Bucket
+        Parameters:
+          - S3Bucket
+          - S3Key
+          - S3ObjectVersion
+
+      - Label:
+          default: General
+        Parameters:
+          - KeyPair
+          - LabNetworkStackName
+
+    ParameterLabels:
+      VPC:
+        default: Address range for the VPC
+      PrivateSubnet:
+        default: Address range for the Private Subnet
+      PublicSubnet:
+        default: Address range for the Public Subnet
+      PrivateInstanceAMI:
+        default: AMI ID
+      PrivateInstanceType:
+        default: Instance type to use for the Private Instances
+      S3Bucket:
+        default: S3 Bucket Name
+      S3Key:
+        default: S3 Key Name
+      S3ObjectVersion:
+        default: S3 Object Version
+      KeyPair:
+        default: EC2 KeyPair
+      LabNetworkStackName:
+        default: Stack Name
+
+Parameters:
+  VPC:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this VPC (first octet must be 10. and must use /16)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(16)
+    Default: 10.100.0.0/16
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/16
+  PrivateSubnet:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this subnet (first octet must be 10. and must use /24)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(24)
+    Default: 10.100.1.0/24
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/24
+  PublicSubnet:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this subnet (first octet must be 10. and must use /24)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(24)
+    Default: 10.100.11.0/24
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/24
+  PrivateInstanceAMI:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Description: The  AMI ID to use for the Private instances
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    ConstraintDescription: Must be a valid Image Id
+  PrivateInstanceType:
+    Type: String
+    Description: Private Instance Type
+    AllowedValues: 
+      - t2.micro
+      - t2.medium
+      - t3.micro
+      - t3.medium
+    Default: t3.medium
+  S3Bucket:
+    Type: String
+    Description: The S3 Bucket containing the Lambda Function .zip file
+    AllowedPattern: ^((?!xn--)(?!.*-s3alias)[a-z0-9][a-z0-9-]{1,61}[a-z0-9])$
+    ConstraintDescription: Must be a valid S3 Bucket
+  S3Key:
+    Type: String
+    Description: The name of the Lambda Function .zip file stored inside the S3 Bucket
+    AllowedPattern: (.*.zip)$
+    Default: lambda_function.zip
+    ConstraintDescription: Must be a valid 
+  S3ObjectVersion:
+    Type: String
+    Description: The S3 Object Version of the Lambda Function .zip file uploaded to the S3 Bucket
+    ConstraintDescription: Must be a valid S3 Object Version
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to use for SSH access to lab instances
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair
+  LabNetworkStackName:
+    Type: String
+    Description: The Stack Name associated with the 'CreateLabNetwork.yaml' deployment
+    Default: CreateLabNetwork
+    ConstraintDescription: Must be a valid CloudFormation Stack
+
+Resources:
+  # Create a VPC for our peering configuration
+  CreateVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPC
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: lab-vpc-2
+
+  # Create the Public and Private Subnets for our new network
+  CreatePrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CreateVPC
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
+      CidrBlock: !Ref PrivateSubnet
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: lab-us-east-1a-priv-subnet-peer
+
+  CreatePublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CreateVPC
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
+      CidrBlock: !Ref PublicSubnet
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: lab-us-east-1a-pub-subnet-peer
+
+# Create Internet Gateway and attach them to our VPCs
+  CreateInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: lab-igw-2
+
+  AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref CreateInternetGateway
+      VpcId: !Ref CreateVPC
+
+  # Create NAT Gateway
+  CreateEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  CreateNGW:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt CreateEIP.AllocationId
+      SubnetId: !Ref CreatePublicSubnet
+
+  # Create and Configure Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CreateVPC
+      Tags:
+        - Key: Name
+          Value: Public Routes (Peered)
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CreateVPC
+      Tags:
+        - Key: Name
+          Value: Private Routes (Peered)
+
+  DefaultPublicRoute:
+    DependsOn: 
+      - AttachIGW
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref CreateInternetGateway
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref CreateNGW
+
+  AssociateRTPublicSub:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref CreatePublicSubnet
+
+  AssociateRTPrivateSub:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref CreatePrivateSubnet
+
+  # Create Security Groups
+  InternalSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "lab-internal-sg2"
+      GroupDescription: "Security group allowing port 22 (SSH) access between internal private instances"
+      VpcId: !Ref CreateVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/8
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.0.0.0/8
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 10.0.0.0/8
+      Tags:
+        - Key: Name
+          Value: InternalSG2
+
+  # Create Private EC2 Instance
+  CreatePrivateInstance:
+    DependsOn:
+      - DefaultPrivateRoute
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref PrivateInstanceAMI
+      InstanceType: !Ref PrivateInstanceType
+      IamInstanceProfile: "lab-admin-role"
+      KeyName: !Ref KeyPair
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: False
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref InternalSG
+          SubnetId:
+            !Ref CreatePrivateSubnet
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -xe
+          sudo yum update -y
+          sudo yum install httpd -y
+          sudo systemctl start httpd
+          sudo systemctl enable httpd
+          echo "Lab Network Web Server Test Page" > /var/www/html/index.html
+          sudo systemctl reload httpd
+      Tags:
+      - Key: Name
+        Value: lab-private-instance-peer
+
+  # Create IAM Role to be assigned to our Lambda Function
+  CreateLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaExecutionRolePermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:AcceptVpcPeeringConnection
+                  - ec2:CreateRoute
+                  - ec2:CreateVpcPeeringConnection
+                  - ec2:DeleteRoute
+                  - ec2:DeleteVpcPeeringConnection
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeVpcPeeringConnections
+                  - ec2:DescribeVpcs
+
+                Resource: "*"
+      Path: /
+      Description: Role assigned the the Lambda handling Vpc Peering Connections
+      RoleName: lab-lambda-execution-role
+
+  # Create Lambda function
+  CreateLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lab-peering-function
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3Key
+        S3ObjectVersion: !Ref S3ObjectVersion
+      Role: !GetAtt CreateLambdaExecutionRole.Arn
+      Description: Lambda function automates the process of creating and deleting Vpc Peering Connections
+      Timeout: 60
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          ACCOUNT: !Ref AWS::AccountId
+          REGION: !Ref AWS::Region
+          STACK: !Ref AWS::StackName
+          PEER_VPC_CIDR: !Ref VPC
+          LAB_VPC_CIDR:
+            Fn::ImportValue:
+              !Sub "${LabNetworkStackName}-VpcCIDR" 
+
+  CreateCustomResourceLambda:
+    Type: Custom::ConfigurePeeringConnection
+    Properties:
+      ServiceToken: !GetAtt CreateLambdaFunction.Arn
+
+Outputs:
+  VPC:
+    Description: VPC for the lab network
+    Value: !Ref CreateVPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC'
+  PrivateSubnet:
+    Description: lab-us-east-1a-priv-subnet-peer
+    Value: !Ref CreatePrivateSubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet1'
+  PublicSubnet1:
+    Description: lab-us-east-1a-pub-subnet-peer
+    Value: !Ref CreatePublicSubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnet1'
+  PeeringConnectionId:
+    Description: The VPC Peering Connection Id
+    Value: !GetAtt CreateCustomResourceLambda.VpcPeeringConnectionId
+    Export:
+      Name: !Sub '${AWS::StackName}-PeeringConnectionId'

@@ -1,0 +1,467 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates a baseline underlying network including a Vpc, Public and Private Subnets, a Bastion Host, Internet and NAT gateways, and more.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Networking
+        Parameters:
+          - VPC
+          - PrivateSubnet1
+          - PrivateSubnet2
+          - PublicSubnet1
+          - PublicSubnet2
+          - RemoteAddress
+      - Label:
+          default: BastionHost
+        Parameters:
+          - BastionHostInstanceType
+          - BastionHostAMI
+      - Label:
+          default: PrivateInstances
+        Parameters:
+          - PrivateInstanceType
+          - PrivateInstanceAMI
+      - Label:
+          default: General
+        Parameters:
+          - KeyPair
+
+    ParameterLabels:
+      VPC:
+        default: Address range for the VPC
+      PrivateSubnet1:
+        default: Address range for Private Subnet 1
+      PrivateSubnet2:
+        default: Address range for Private Subnet 2
+      PublicSubnet1:
+        default: Address range for Public Subnet 1
+      PublicSubnet2:
+        default: Address range for Public Subnet 2
+      RemoteAddress:
+        default: Address range allowed to access the Bastion Host
+      BastionHostInstanceType:
+        default: Instance type to use for the Bastion Host instance
+      BastionHostAMI:
+        default: AMI ID
+      PrivateInstanceAMI:
+        default: AMI ID
+      PrivateInstanceType:
+        default: Instance type to use for the Private Instances
+      KeyPair:
+        default: EC2 KeyPair
+
+Parameters:
+  VPC:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this VPC (first octet must be 10. and must use /16)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(16)
+    Default: 10.0.0.0/16
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/16
+  PrivateSubnet1:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this subnet (first octet must be 10. and must use /24)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(24)
+    Default: 10.0.1.0/24
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/24
+  PrivateSubnet2:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this subnet (first octet must be 10. and must use /24)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(24)
+    Default: 10.0.2.0/24
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/24
+  PublicSubnet1:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this subnet (first octet must be 10. and must use /24)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(24)
+    Default: 10.0.11.0/24
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/24
+  PublicSubnet2:
+    Type: String
+    Description: Enter the IP range in CIDR notation for this subnet (first octet must be 10. and must use /24)
+    AllowedPattern: (^10)\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(24)
+    Default: 10.0.12.0/24
+    ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/24
+  RemoteAddress:
+    Type: String
+    Description: Enter the IP range in CIDR notation for the system or network allowed access to the Bastion Host
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Default: 0.0.0.0/0
+    ConstraintDescription: Must be a valid IP address in the form of X.X.X.X/X
+  BastionHostInstanceType:
+    Type: String
+    Description: Bastion Host Instance Type
+    AllowedValues: 
+      - t2.micro
+      - t2.medium
+      - t3.micro
+      - t3.medium
+    Default: t3.medium
+    ConstraintDescription: Must be a valid instance type from the list
+  BastionHostAMI:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Description: The Image Id to use for the Bastion Host instance
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    ConstraintDescription: Must be a valid Image Id
+  PrivateInstanceAMI:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Description: The  AMI ID to use for the Private instances
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    ConstraintDescription: Must be a valid Image Id
+  PrivateInstanceType:
+    Type: String
+    Description: Private Instance Type
+    AllowedValues: 
+      - t2.micro
+      - t2.medium
+      - t3.micro
+      - t3.medium
+    Default: t3.medium
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to use for SSH access to lab instances
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair
+
+Resources:
+  # Create the VPC for our new network
+  CreateVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPC
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: lab-vpc-1
+  
+  # Create the Private and Public Subnets
+  CreatePrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CreateVPC
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
+      CidrBlock: !Ref PrivateSubnet1
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: lab-us-east-1a-priv-subnet
+
+  CreatePrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CreateVPC
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
+      CidrBlock: !Ref PrivateSubnet2
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: lab-us-east-1b-priv-subnet
+
+  CreatePublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CreateVPC
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
+      CidrBlock: !Ref PublicSubnet1
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: lab-us-east-1a-pub-subnet
+
+  CreatePublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref CreateVPC
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
+      CidrBlock: !Ref PublicSubnet2
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: lab-us-east-1b-pub-subnet
+
+  # Create an Internet Gateway and attach it to our VPC
+  CreateInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: lab-igw-1
+
+  AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref CreateInternetGateway
+      VpcId: !Ref CreateVPC
+  
+  # Create two NAT Gateways (one in each public subnet) to provide High Availability
+  CreateEIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  CreateEIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  CreateNGW1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt CreateEIP1.AllocationId
+      SubnetId: !Ref CreatePublicSubnet1
+
+  CreateNGW2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt CreateEIP2.AllocationId
+      SubnetId: !Ref CreatePublicSubnet2
+
+  # Create and Configure Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CreateVPC
+      Tags:
+        - Key: Name
+          Value: Public Routes
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CreateVPC
+      Tags:
+        - Key: Name
+          Value: Private Routes (AZ1)
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref CreateVPC
+      Tags:
+        - Key: Name
+          Value: Private Routes (AZ2)
+
+  DefaultPublicRoute:
+    DependsOn: 
+      - AttachIGW
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref CreateInternetGateway
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref CreateNGW1
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref CreateNGW2
+
+  AssociateRTPublicSub1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref CreatePublicSubnet1
+
+  AssociateRTPublicSub2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref CreatePublicSubnet2
+
+  AssociateRTPrivateSub1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref CreatePrivateSubnet1
+
+  AssociateRTPrivateSub2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref CreatePrivateSubnet2
+  
+  # Create Security Groups
+  BastionHostSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName:  "lab-bh-sg"
+      GroupDescription: "Security group allowing port 22 (SSH) access to our Bastion Host"
+      VpcId: !Ref CreateVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref RemoteAddress
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: !Ref RemoteAddress
+      Tags:
+        - Key: Name
+          Value: BastionHostSG
+  
+  InternalSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "lab-internal-sg"
+      GroupDescription: "Security group allowing port 22 (SSH) access between internal private instances"
+      VpcId: !Ref CreateVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionHostSG
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          SourceSecurityGroupId: !Ref BastionHostSG
+      Tags:
+        - Key: Name
+          Value: InternalSG
+  
+  # Create IAM Role(s) / Instance Profile(s)
+  CreateAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: /
+      Description: Default role for the lab environment providing Admin access
+      RoleName: lab-admin-role
+  
+  CreateAdminInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: lab-admin-role
+      Path: /
+      Roles:
+        - !Ref CreateAdminRole
+
+  # Create Bastion Host
+  CreateBastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref BastionHostAMI
+      InstanceType: !Ref BastionHostInstanceType
+      IamInstanceProfile: !Ref CreateAdminInstanceProfile
+      KeyName: !Ref KeyPair
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: True
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref BastionHostSG
+          SubnetId:
+            !Ref CreatePublicSubnet1
+      Tags:
+      - Key: Name
+        Value: lab-bastion-host
+  
+  # Create Private EC2 Instances
+  CreatePrivateInstance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref PrivateInstanceAMI
+      InstanceType: !Ref PrivateInstanceType
+      IamInstanceProfile: !Ref CreateAdminInstanceProfile
+      KeyName: !Ref KeyPair
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: False
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref InternalSG
+          SubnetId:
+            !Ref CreatePrivateSubnet1
+      Tags:
+      - Key: Name
+        Value: lab-private-instance1
+  
+  CreatePrivateInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref PrivateInstanceAMI
+      InstanceType: !Ref PrivateInstanceType
+      IamInstanceProfile: !Ref CreateAdminInstanceProfile
+      KeyName: !Ref KeyPair
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: False
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref InternalSG
+          SubnetId:
+            !Ref CreatePrivateSubnet2
+      Tags:
+      - Key: Name
+        Value: lab-private-instance2
+  
+  # Create Lab S3 Bucket
+  CreateLabS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "lab-s3-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+      VersioningConfiguration:
+          Status: Enabled
+
+Outputs:
+  VPC:
+    Description: VPC for the lab network
+    Value: !Ref CreateVPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC'
+  VpcCIDR:
+    Description: The CIDR address for the Lab Network
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcCIDR'
+  PrivateSubnet1:
+    Description: lab-us-east-1a-priv-subnet
+    Value: !Ref CreatePrivateSubnet1
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet1'
+  PrivateSubnet2:
+    Description: lab-us-east-1b-priv-subnet
+    Value: !Ref CreatePrivateSubnet2
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet2'
+  PublicSubnet1:
+    Description: lab-us-east-1a-pub-subnet
+    Value: !Ref CreatePublicSubnet1
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnet1'
+  PublicSubnet2:
+    Description: lab-us-east-1b-pub-subnet
+    Value: !Ref CreatePublicSubnet2
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnet2'
