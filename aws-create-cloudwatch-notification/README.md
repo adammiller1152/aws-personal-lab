@@ -16,3 +16,6 @@ Once all pre-requisites are met, this file can be deployed within **CloudFormati
 
 ## Notes
 Once the CloudFormation template successfully deploys, check your e-mail for an SNS subscription confirmation e-mail. You will want to confirm your e-mail **before** logging in as the User who will trigger the CloudWatch Alarm.
+
+## Deployment Diagram
+![CloudFormationResources](ResourceDiagram.png)
