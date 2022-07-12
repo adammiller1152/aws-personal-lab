@@ -307,7 +307,7 @@ Resources:
 
                 Resource: "*"
       Path: /
-      Description: Role assigned the the Lambda handling Vpc Peering Connections
+      Description: Role assigned to the Lambda handling Vpc Peering Connections
       RoleName: lab-lambda-execution-role
 
   # Create Lambda function
