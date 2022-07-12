@@ -465,3 +465,8 @@ Outputs:
     Value: !Ref CreatePublicSubnet2
     Export:
       Name: !Sub '${AWS::StackName}-PublicSubnet2'
+  S3Bucket:
+    Description: Lab S3 Bucket
+    Value: !Ref CreateLabS3Bucket
+    Export:
+      Name: !Sub '${AWS::StackName}-S3Bucket'
