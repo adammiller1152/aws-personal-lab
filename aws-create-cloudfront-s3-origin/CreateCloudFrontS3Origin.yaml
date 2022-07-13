@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploys a CloudFront distribution which uses Origin Access Identity to access content within a Private S3 Bucket.
+Resources:
+  # Create Private S3 Bucket to be used with CloudFront
+  CreatePrivateS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "private-bucket-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      AccessControl: Private
+      VersioningConfiguration:
+          Status: Enabled
+
+  # Create CloudFront Origin Access Identity
+  CreateCloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: "Origin Identity for AWS Lab"
+
+  # Update Bucket Policy to allow read access with CloudFront OAI
+  UpdateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CreatePrivateS3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CreateCloudFrontOAI}"
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${CreatePrivateS3Bucket}/*"
+
+  # Create CloudFront Distribution
+  CreateCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Origins:
+          - DomainName: !GetAtt CreatePrivateS3Bucket.DomainName
+            Id: Private-S3-Bucket
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CreateCloudFrontOAI}"
+        Comment: Lab Distribution
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # 'CachingOptimized' managed cache policy
+          TargetOriginId: Private-S3-Bucket
+          ViewerProtocolPolicy: redirect-to-https
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+Outputs:
+  S3Bucket:
+    Description: The private S3 Bucket used associated with CloudFront
+    Value: !Ref CreatePrivateS3Bucket
+  CloudFrontDomainName:
+    Description: The domain name of the CloudFront distribution
+    Value: !GetAtt CreateCloudFrontDistribution.DomainName
