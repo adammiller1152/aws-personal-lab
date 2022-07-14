@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploys Amazon Inspector Classic and configures a scheduled event to trigger an assessment. Optionally, deploys an EC2 instance and installs the Amazon Inspector agent.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: EC2
+        Parameters:
+          - DeployAssessmentInstance
+          - AssessmentInstanceType
+          - AssessmentInstanceAMI
+
+      - Label:
+          default: General
+        Parameters:
+          - LabNetworkStackName
+
+    ParameterLabels:
+      DeployAssessmentInstance:
+        default: Deploy New Instance
+      AssessmentInstanceType:
+        default: Instance Type
+      AssessmentInstanceAMI:
+        default: AMI
+      LabNetworkStackName:
+        default: Stack Name
+
+Parameters:
+  DeployAssessmentInstance:
+    Type: String
+    Description: Select 'true' in order to deploy a new instance to be used for an Inspector Assessment
+    AllowedValues: 
+      - true
+      - false
+    Default: true
+  AssessmentInstanceType:
+    Type: String
+    Description: Instance type to use if DeployAssessmentInstance is set to 'true'
+    AllowedValues: 
+      - t2.micro
+      - t2.medium
+      - t3.micro
+      - t3.medium
+    Default: t3.medium
+  AssessmentInstanceAMI:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Description: The AMI to use if DeployAssessmentInstance is set to 'true'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    ConstraintDescription: Must be a valid Image Id
+  LabNetworkStackName:
+    Type: String
+    Description: The Stack Name associated with the 'CreateLabNetwork.yaml' deployment
+    Default: CreateLabNetwork
+    ConstraintDescription: Must be a valid CloudFormation Stack
+
+Conditions:
+  DeployInstance: !Equals [!Ref DeployAssessmentInstance, true]
+
+Resources:
+  # Create IAM Role(s)
+  CreateAssessmentInstanceRole:
+    Type: AWS::IAM::Role
+    Condition: DeployInstance
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: AllowRunCommand
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: "*"
+      Path: /
+      Description: This role enables AWS Systems Manager service core functionality
+      RoleName: lab-assessment-instance-role
+
+  CreateAssessmentEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InspectorPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: inspector:StartAssessmentRun
+                Resource: "*"
+      Path: /
+      Description: This role is used by CloudWatch Events (EventBridge) to perform the scheduled assessment
+      RoleName: lab-assessment-event-role
+  
+  # Create Instance Profile
+  CreateAssessmentInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: DeployInstance
+    Properties:
+      InstanceProfileName: !Ref CreateAssessmentInstanceRole
+      Path: /
+      Roles:
+        - !Ref CreateAssessmentInstanceRole
+
+  # Create Security Group for Assessment Instance
+  AssessmentSG:
+    Type: AWS::EC2::SecurityGroup
+    Condition: DeployInstance
+    Properties:
+      GroupName: "lab-assessment-sg"
+      GroupDescription: "Security group allowing port 22 (SSH) and ICMP access to the Inspector assessment instance"
+      VpcId: 
+        Fn::ImportValue:
+          !Sub '${LabNetworkStackName}-VPC'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/8
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.0.0.0/8
+      Tags:
+        - Key: Name
+          Value: AssessmentSG
+  
+  # Create Assessment Instance
+  CreateAssessmentInstance:
+    Type: AWS::EC2::Instance
+    Condition: DeployInstance
+    Properties:
+      ImageId: !Ref AssessmentInstanceAMI
+      InstanceType: !Ref AssessmentInstanceType
+      IamInstanceProfile: !Ref CreateAssessmentInstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: False
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref AssessmentSG
+          SubnetId:
+            Fn::ImportValue:
+              !Sub '${LabNetworkStackName}-PrivateSubnet1'
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -xe
+          sudo yum update -y
+          id=$(curl http://169.254.169.254/latest/meta-data/instance-id)
+          /usr/bin/aws ssm send-command --document-name "AmazonInspector-ManageAWSAgent" --targets Key=InstanceIds,Values=$id  --region us-east-1
+      Tags:
+      - Key: Name
+        Value: lab-assessment-instance
+
+  # Deploy Inspector
+  CreateAssessmentTarget:
+    Type: AWS::Inspector::AssessmentTarget
+    Properties:
+      AssessmentTargetName: LabTargets
+
+  CreateAssessmentTemplate:
+    Type: AWS::Inspector::AssessmentTemplate
+    Properties:
+      AssessmentTargetArn: !Ref CreateAssessmentTarget
+      AssessmentTemplateName: LabAssessmentTemplate
+      DurationInSeconds: 3600
+      RulesPackageArns:
+        - arn:aws:inspector:us-east-1:316112463485:rulespackage/0-gEjTy7T7
+        - arn:aws:inspector:us-east-1:316112463485:rulespackage/0-rExsr2X8
+        - arn:aws:inspector:us-east-1:316112463485:rulespackage/0-PmNV0Tcd
+        - arn:aws:inspector:us-east-1:316112463485:rulespackage/0-R01qwB5Q
+
+  # Configure Scheduled Event
+  CreateAssessmentSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ScheduledAssessment
+      Description: !Sub "Triggers the Amazon Inspector Assessment"
+      State: ENABLED
+      Targets:
+        - Arn: !Ref CreateAssessmentTemplate
+          Id: "LabAssessment"
+          RoleArn: !GetAtt CreateAssessmentEventRole.Arn
+      ScheduleExpression: "cron(0 * ? * * *)"
