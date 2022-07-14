@@ -320,7 +320,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: "lab-internal-sg"
-      GroupDescription: "Security group allowing port 22 (SSH) access between internal private instances"
+      GroupDescription: "Security group allowing port 22 (SSH) and ICMP access from the Bastion Host"
       VpcId: !Ref CreateVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -470,3 +470,8 @@ Outputs:
     Value: !Ref CreateLabS3Bucket
     Export:
       Name: !Sub '${AWS::StackName}-S3Bucket'
+  InternalSG:
+    Description: The internal Security Group for private instances
+    Value: !GetAtt InternalSG.GroupId
+    Export:
+      Name: !Sub '${AWS::StackName}-InternalSG'

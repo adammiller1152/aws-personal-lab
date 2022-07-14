@@ -59,7 +59,7 @@ Resources:
 
 Outputs:
   S3Bucket:
-    Description: The private S3 Bucket used associated with CloudFront
+    Description: The private S3 Bucket associated with CloudFront
     Value: !Ref CreatePrivateS3Bucket
   CloudFrontDomainName:
     Description: The domain name of the CloudFront distribution
