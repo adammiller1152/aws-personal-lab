@@ -74,7 +74,7 @@ Parameters:
     ConstraintDescription: Must be a valid IP address in the form of 10.X.X.X/24
   PrivateInstanceAMI:
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Description: The  AMI ID to use for the Private instances
+    Description: The AMI ID to use for the Private instances
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
     ConstraintDescription: Must be a valid Image Id
   PrivateInstanceType:
@@ -226,7 +226,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: "lab-internal-sg2"
-      GroupDescription: "Security group allowing port 22 (SSH) access between internal private instances"
+      GroupDescription: "Security group allowing port 22 (SSH) , port 80 (HTTP) and ICMP access to internal private instances"
       VpcId: !Ref CreateVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
