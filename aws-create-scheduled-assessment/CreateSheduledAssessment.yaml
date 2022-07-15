@@ -21,7 +21,7 @@ Metadata:
       AssessmentInstanceType:
         default: Instance Type
       AssessmentInstanceAMI:
-        default: AMI
+        default: AMI ID
       LabNetworkStackName:
         default: Stack Name
 
@@ -189,7 +189,7 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Name: ScheduledAssessment
-      Description: !Sub "Triggers the Amazon Inspector Assessment"
+      Description: "Triggers the Amazon Inspector Assessment"
       State: ENABLED
       Targets:
         - Arn: !Ref CreateAssessmentTemplate
