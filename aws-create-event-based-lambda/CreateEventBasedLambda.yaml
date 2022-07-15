@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploys an S3 Bucket which triggers a Lambda when files are uploaded. The Lambda function processes the file and sends a message to an SQS queue.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: S3 Bucket
+        Parameters:
+          - S3Bucket
+
+    ParameterLabels:
+      S3Bucket:
+        default: S3 Bucket Name
+
+Parameters:
+  S3Bucket:
+    Type: String
+    Description: The name of the S3 bucket being created for files to be uploaded to (The account number will be appended to this name in the form of <name>-<account-number>)
+    AllowedPattern: ^((?!xn--)(?!.*-s3alias)[a-z0-9][a-z0-9-]{1,61}[a-z0-9])$
+    Default: event-bucket
+    ConstraintDescription: Must be a valid S3 Bucket name
+
+Resources:
+  # Create S3 Bucket
+  CreateEventBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${S3Bucket}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      AccessControl: Private
+      VersioningConfiguration:
+          Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt CreateLambdaFunction.Arn
+
+  # Create SQS Queue
+  CreateSQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: LabQueue
+      MessageRetentionPeriod: 86400
+
+  # Create IAM Role
+  CreateLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaExecutionRolePermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:GetQueueUrl
+                  - sqs:ListQueues
+                  - sqs:SendMessage
+                Resource: !GetAtt CreateSQSQueue.Arn
+      Path: /
+      Description: !Sub
+        - "Role assigned to the Lambda handling receiving events from S3 and sending messages to the SQS Queue: ${QueueName}"
+        - QueueName: !GetAtt CreateSQSQueue.QueueName
+      RoleName: lab-lambda-execution-role
+
+  # Create Lambda Function
+  CreateLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+
+          # Global variables
+          REGION = os.environ["REGION"]
+          SQS_QUEUE = os.environ["SQS_QUEUE"]
+          sqs = boto3.client("sqs", region_name=REGION)
+
+          # uses boto3 to determine the url for the sqs queue
+          def get_sqs_queue_url():
+            try:
+              response = sqs.get_queue_url(
+                QueueName=SQS_QUEUE
+              )
+
+              return response["QueueUrl"]
+            
+            except Exception as err:
+              print(f"Received an error: {err}")
+
+          # function sends a message to the sqs queue
+          def send_sqs_message(bucket, object, time, source, queue_url):
+            try:
+              message = {
+                "event_time": time,
+                "s3_bucket": bucket,
+                "s3_object": object,
+                "source_ip": source,
+                "Message": "File uploaded"
+              }
+
+              message_body = json.dumps(message)
+
+              response = sqs.send_message(
+                QueueUrl=queue_url,
+                MessageBody=message_body
+              )
+
+              return response
+
+            except Exception as err:
+              print(f"Received an error: {err}")
+
+          # parse data from event to build message being sent to the sqs queue
+          def lambda_handler(event, context):
+            for index in range(len(event)):
+              s3_bucket = event["Records"][index]["s3"]["bucket"]["name"]
+              s3_object = event["Records"][index]["s3"]["object"]["key"]
+              event_time = event["Records"][index]["eventTime"]
+              source_ip = event["Records"][index]["requestParameters"]["sourceIPAddress"]
+
+            sqs_queue_url = get_sqs_queue_url()
+            sent_message = send_sqs_message(s3_bucket, s3_object, event_time, source_ip, sqs_queue_url)
+
+            print(sent_message)
+      Role: !GetAtt CreateLambdaExecutionRole.Arn
+      Description: Lambda function receives events from S3 and sends a message to an SQS Queue
+      Timeout: 60
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          SQS_QUEUE: !GetAtt CreateSQSQueue.QueueName
+
+  # Invoke Lambda Function
+  LambdaInvokePermissions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CreateLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub "arn:aws:s3:::${S3Bucket}-${AWS::AccountId}"
+
+Outputs:
+  S3Bucket:
+    Description: Event Bucket
+    Value: !Ref CreateEventBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-S3Bucket"
+  LambdaFunctionName:
+    Description: Lambda Function Name
+    Value: !Ref CreateLambdaFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaName"
+  LambdaFunctionArn:
+    Description: Lambda Function Arn
+    Value: !GetAtt CreateLambdaFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaArn"
+  SQSQueueName:
+    Description: SQS Queue Name
+    Value: !GetAtt CreateSQSQueue.QueueName
+    Export:
+      Name: !Sub "${AWS::StackName}-SQSQueueName"
+  SQSQueueUrl:
+    Description: SQS Queue URL
+    Value: !Ref CreateSQSQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-SQSQueueURL"

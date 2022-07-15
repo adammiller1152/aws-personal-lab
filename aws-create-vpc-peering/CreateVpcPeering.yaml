@@ -304,7 +304,6 @@ Resources:
                   - ec2:DescribeRouteTables
                   - ec2:DescribeVpcPeeringConnections
                   - ec2:DescribeVpcs
-
                 Resource: "*"
       Path: /
       Description: Role assigned to the Lambda handling Vpc Peering Connections
